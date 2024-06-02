@@ -65,8 +65,13 @@ conversation_data = defaultdict(lambda: {"messages": []})
 def is_authorized(interaction: discord.Interaction):
     """Check if the user has permission to use the command."""
     user = interaction.user
-    return user.id in authorized_users or any(role.id in authorized_roles for role in user.roles)
-
+    if user.id in authorized_users:
+        return True
+    if any(role.id in authorized_roles for role in user.roles):
+        return True
+    if user.id == interaction.guild.owner_id:
+        return True
+    return False
 # --- Application Commands ---
 
 @bot.tree.command(name="serverinfo", description="Get information about the server.")
