@@ -1,3 +1,4 @@
 discord.py
 groq
 google-generativeai
+PyNaCl

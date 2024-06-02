@@ -10,6 +10,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
+import asyncio
 
 # Load environment variables from .env file
 load_dotenv()
@@ -276,6 +277,54 @@ async def summarize(interaction: discord.Interaction, text: str):
 
     except Exception as e:
         await interaction.response.send_message(f"An error occurred: {e}")
+
+
+@bot.tree.command(name="play_audio", description="Join a voice channel and play audio. (Authorized users only)")
+async def play_audio(interaction: discord.Interaction, channel: discord.VoiceChannel):
+    """Joins a specified voice channel and plays an audio file.
+
+    Args:
+        channel: The voice channel to join.
+    """
+
+    if not is_authorized(interaction):
+        await interaction.response.send_message(
+            "You are not authorized to use this command.", ephemeral=True
+        )
+        return
+
+    # Check if the bot is already connected to a voice channel
+    if interaction.guild.voice_client:
+        await interaction.response.send_message(
+            "The bot is already connected to a voice channel.", ephemeral=True
+        )
+        return
+
+    try:
+        # Connect to the specified voice channel
+        await channel.connect()
+        await interaction.response.send_message(
+            f"Connected to voice channel: {channel.name}", ephemeral=True
+        )
+
+        # Path to your audio file (replace with the actual path)
+        audio_file = r"path to audio shit"
+
+        # Create a StreamPlayer for the audio
+        source = discord.FFmpegPCMAudio(audio_file)
+        interaction.guild.voice_client.play(source)
+
+        # Wait until the audio finishes playing
+        while interaction.guild.voice_client.is_playing():
+            await asyncio.sleep(1)
+
+        # Disconnect from the voice channel
+        await interaction.guild.voice_client.disconnect()
+
+    except Exception as e:
+        await interaction.response.send_message(
+            f"An error occurred: {e}", ephemeral=True
+        )
 
 
 @bot.tree.command(name="set_context_messages", description="Set the number of context messages to use (1-10) for the entire bot.")
