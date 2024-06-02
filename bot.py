@@ -166,6 +166,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/trending_projects <query>", value="Show trending GitHub projects (past 7 days). Default query: 'topic:language-model'.", inline=False)
     embed.add_field(name="/search_github_projects <query>", value="Search for GitHub projects.", inline=False)
     embed.add_field(name="/summarize <prompt>", value="Summarize info given.", inline=False)
+    embed.add_field(name="/play_audio", value="plays an audio based on what the file path in code says (ADMIN)", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="trending_projects", description="Show trending GitHub projects.")
