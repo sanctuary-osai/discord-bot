@@ -9,6 +9,7 @@ from collections import defaultdict
 import requests
 import json
 from datetime import datetime, timedelta
+import google.generativeai as gemini
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +19,9 @@ GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
+
+# Initialize the Google Generative AI client
+gemini.configure(api_key=GOOGLE_API_KEY)
 
 # Initialize the bot with intents
 intents = discord.Intents.default()
@@ -31,7 +35,7 @@ authorized_roles = [1198707036070871102]   # Replace with role IDs
 
 # Bot-wide settings
 bot_settings = {
-    "model": "llama3-8b-8192",
+    "model": "llama3-70b-8192",
     "system_prompt": "You are a helpful and friendly AI assistant.",
     "context_messages": 5,
     "llm_enabled": False  # LLM is enabled by default for the entire bot
@@ -44,9 +48,10 @@ groq_models = [
     "gemma-7b-it",
     "mixtral-8x7b-32768"
 ]
+# Define valid model names for Gemini
 gemini_models = [
-    "flash",
-    "pro"
+    "gemini-1.5-flash",
+    "gemini-1.5-pro-latest" 
 ]
 
 # Bot-wide settings
@@ -238,34 +243,24 @@ async def set_system_prompt(interaction: discord.Interaction, prompt: str):
 @bot.tree.command(name="summarize", description="Summarize a text using the current LLM.")
 async def summarize(interaction: discord.Interaction, text: str):
 
-
     try:
         selected_model = bot_settings["model"]
 
         if selected_model in gemini_models:
-            # Use Gemini API for summarization
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key={GOOGLE_API_KEY}'
-            headers = {'Content-Type': 'application/json'}
-            data = {
-                "contents": [{"parts": [{"text": text}]}],
-                "parameters": {
-                    "temperature": 0.7,  # You can adjust temperature for more creative summarization
-                    "top_k": 50,       # Adjust top_k to control the diversity of the summary
-                    "top_p": 0.9,       # Adjust top_p to control the diversity of the summary
-                    "max_output_tokens": 256, # Limit the length of the summary
-                    "prompt": "Summarize the following text:\n\n" + text,
-                }
-            }
+            try:
+                # Create a Gemini model instance (do this once, maybe outside the function)
+                gemini_model = gemini.GenerativeModel(selected_model) 
 
-            response = requests.post(url, headers=headers, data=json.dumps(data))
+                # Use the model instance to generate content
+                response = gemini_model.generate_content( 
+                    f"Summarize the following text:\n\n{text}",
+                )
 
-            if response.status_code == 200:
-                response_json = response.json()
-                summary = response_json['candidates'][0]['content']['parts'][0]['text']
+                # Extract the summary from the response
+                summary = response.text
                 await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
-            else:
-                await interaction.response.send_message(f"Error: {response.status_code}\n{response.text}")
-                return
+            except Exception as e:
+                await interaction.response.send_message(f"An error occurred while processing the request: {e}")
 
         else: # Use Groq API for summarization
             system_prompt = bot_settings["system_prompt"]
