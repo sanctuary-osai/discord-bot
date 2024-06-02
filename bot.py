@@ -11,13 +11,14 @@ import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
 import asyncio
-
+import subprocess
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') 
-
+WHISPER_CPP_PATH = os.getenv('WHISPER_CPP_PATH')  # Path to the whisper.cpp executable
+WHISPER_MODEL = os.getenv('WHISPER_CPP_MODEL')   # Specify the Whisper model you want to use
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
