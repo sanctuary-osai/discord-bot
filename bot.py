@@ -11,7 +11,6 @@ import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
 import asyncio
-import subprocess
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -56,13 +55,6 @@ gemini_models = [
     "gemini-1.5-pro-latest" 
 ]
 
-# Bot-wide settings
-bot_settings = {
-    "model": "llama3-8b-8192",
-    "system_prompt": "You are a helpful and friendly AI assistant.",
-    "context_messages": 5,
-    "llm_enabled": False  # Start with LLMs off 
-}
 
     # --- Conversation Data (Important!) chatting shit
 conversation_data = defaultdict(lambda: {"messages": []}) 
@@ -421,6 +413,9 @@ async def on_message(message):
 
         except Exception as e:
             await message.channel.send(f"An error occurred: {e}")
+
+
+
 
 # --- Event Handling ---
 
