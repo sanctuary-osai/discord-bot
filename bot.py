@@ -3,6 +3,7 @@
 import os
 import discord
 from discord.ext import commands
+from discord import Message
 from dotenv import load_dotenv
 from groq import Groq
 from collections import defaultdict
@@ -11,6 +12,10 @@ import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
 import asyncio
+import io
+import contextlib
+
+
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -39,9 +44,9 @@ bot_settings = {
     "model": "llama3-70b-8192",
     "system_prompt": "You are a helpful and friendly AI assistant.",
     "context_messages": 5,
-    "llm_enabled": False  # LLM is enabled by default for the entire bot
+    "llm_enabled": True  # LLM is enabled by default for the entire bot
 }
-
+code_language = "python"
 # Define valid model names for Groq and Gemini
 groq_models = [
     "llama3-70b-8192",
@@ -62,6 +67,13 @@ conversation_data = defaultdict(lambda: {"messages": []})
 
 # --- Helper Function for Checking Authorization ---
 
+def log_conversation(message: Message, generated_text: str, filename="conversation_log.txt"):
+  log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nuser:{message.author}\n message:{message.content}\n output:{generated_text}\n\n"
+
+  with open(filename, "a", encoding="utf-8") as file:
+    file.write(log_entry)
+
+
 def is_authorized(interaction: discord.Interaction):
     """Check if the user has permission to use the command."""
     user = interaction.user
@@ -69,8 +81,8 @@ def is_authorized(interaction: discord.Interaction):
         return True
     if any(role.id in authorized_roles for role in user.roles):
         return True
-    if user.id == interaction.guild.owner_id:
-        return True
+#    if user.id == interaction.guild.owner_id:
+#        return True
     return False
 # --- Application Commands ---
 
@@ -240,8 +252,93 @@ async def set_system_prompt(interaction: discord.Interaction, prompt: str):
     await interaction.response.send_message(f"System prompt set to:\n```\n{prompt}\n``` for the entire bot.")
 
 
+
+@bot.tree.command(name="control_my_computer", description="Write and run code using an LLM (Admin Only).")
+async def create_code(interaction: discord.Interaction, code_request: str, message: Message):
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # 1. Use Groq to generate code with execution instructions
+        prompt = f"""Write a {code_language} code snippet that will create and run: {code_request}
+        the computer is windows 11
+        The code should be executable directly. 
+        Do not include any backticks or language identifiers in the output.
+        have the code by itself with NO explanation
+        never explain the code or give anything that is not just the pure code
+        name for windows user is user1 for file paths
+        """
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-70b-8192"
+        )
+        generated_code = chat_completion.choices[0].message.content
+        generated_code = generated_code.strip("`")  # Remove backticks
+        generated_code_lobotomised = generated_code[:100]  # Truncate to 1999 characters
+        # 2. Send the generated code back to the user
+        print(f"user: {interaction.user}\n prompt: {code_request}\n output: {generated_code}")
+        print(code_request)
+        print(generated_code)
+        await interaction.channel.send(f"prompt:{code_request} ")
+        
+        # 3. Execute the generated code
+        result = await execute_code(generated_code, code_language)
+        # 4. Send the execution result back to the user
+        if result == "No output.":
+            print("script ran")
+            await interaction.channel.send("Script ran")
+        else:
+         log_conversation(message, result)  
+         await interaction.channel.send(f"The code output is : {result}")
+         print(result)
+
+    except Exception as e:
+        print(f"An error occurred: {e}") 
+        
+
+async def execute_code(code: str, language: str) -> str:
+    try:
+        if language == "python":
+            result = await run_python_code(code)
+        else:
+            result = f"Execution for {language} is not supported yet."
+        return result
+    except Exception as e:
+        print(f"An error occurred during code execution: {e}")
+        return str(e)
+
+async def run_python_code(code: str) -> str:
+    try:
+        with open("temp_code.py", "w") as f:
+            f.write(code)
+
+        proc = await asyncio.create_subprocess_exec(
+            "python", "temp_code.py",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+
+        os.remove("temp_code.py")
+
+        if stdout:
+            return stdout.decode()
+        if stderr:
+            return stderr.decode()
+        return "No output."
+
+    except asyncio.TimeoutError:
+        return "Code execution timed out."
+    except Exception as e:
+        return str(e)      
+
+
 @bot.tree.command(name="summarize", description="Summarize a text using the current LLM.")
-async def summarize(interaction: discord.Interaction, text: str):
+async def summarize(interaction: discord.Interaction, text: str, message: Message):
 
     try:
         selected_model = bot_settings["model"]
@@ -272,6 +369,7 @@ async def summarize(interaction: discord.Interaction, text: str):
                 model=selected_model
             )
             summary = chat_completion.choices[0].message.content
+            log_conversation(message, summarize)  
             await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
 
     except Exception as e:
@@ -365,7 +463,7 @@ async def toggle_llm(interaction: discord.Interaction):
 # --- Message Handling --- 
 
 @bot.event
-async def on_message(message):
+async def on_message(message: Message):
     await bot.process_commands(message)
 
     if message.author == bot.user or not bot_settings["llm_enabled"]:
@@ -410,8 +508,10 @@ async def on_message(message):
                     model=selected_model
                 )
                 generated_text = chat_completion.choices[0].message.content
-
-            await message.channel.send(generated_text.strip())
+                lobotomised_generated_text = generated_text[:2000] 
+            log_conversation(message, generated_text)  
+            await message.channel.send(lobotomised_generated_text.strip())
+            print(f"user:{message.author}\n message:{message.content}\n output:{generated_text}")
 
             messages.append({"role": "user", "content": message.content})
             messages.append({"role": "assistant", "content": generated_text.strip()})
@@ -419,7 +519,7 @@ async def on_message(message):
 
         except Exception as e:
             await message.channel.send(f"An error occurred: {e}")
-
+            print(e)
 
 
 
@@ -430,6 +530,10 @@ async def on_ready():
     print(f'Logged in as {bot.user.name}')
     await bot.tree.sync(guild=None)
     print("Application commands synced.")
+    print("Connected to the following guilds:")
+    for guild in bot.guilds:
+        print(f"  - {guild.name} (ID: {guild.id})")
+
 
 # Run the bot
 bot.run(DISCORD_TOKEN)
