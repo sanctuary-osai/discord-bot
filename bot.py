@@ -14,7 +14,7 @@ import google.generativeai as gemini
 import asyncio
 import io
 import contextlib
-
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -63,6 +63,11 @@ gemini_models = [
 
     # --- Conversation Data (Important!) chatting shit
 conversation_data = defaultdict(lambda: {"messages": []}) 
+
+# --- login shit
+
+logging.basicConfig(filename='bot_log.txt', level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 # --- Helper Function for Checking Authorization ---
@@ -254,7 +259,7 @@ async def set_system_prompt(interaction: discord.Interaction, prompt: str):
 
 
 @bot.tree.command(name="control_my_computer", description="Write and run code using an LLM (Admin Only).")
-async def create_code(interaction: discord.Interaction, code_request: str, message: Message):
+async def create_code(interaction: discord.Interaction, code_request: str):
     if not is_authorized(interaction):
         await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
@@ -279,25 +284,22 @@ async def create_code(interaction: discord.Interaction, code_request: str, messa
         generated_code = generated_code.strip("`")  # Remove backticks
         generated_code_lobotomised = generated_code[:100]  # Truncate to 1999 characters
         # 2. Send the generated code back to the user
-        print(f"user: {interaction.user}\n prompt: {code_request}\n output: {generated_code}")
-        print(code_request)
-        print(generated_code)
-        await interaction.channel.send(f"prompt:{code_request} ")
+        await interaction.channel.send(f"prompt: {code_request}")
         
-        # 3. Execute the generated code
+        # Log the shit
+        logging.info(f"User: {interaction.user} - Prompt: {code_request} - Generated Code: {generated_code_lobotomised}")
+        # 3. generate the generated code :fire:
         result = await execute_code(generated_code, code_language)
-        # 4. Send the execution result back to the user
+        # 4. tell user shit
         if result == "No output.":
-            print("script ran")
             await interaction.channel.send("Script ran")
+            logging.info(f"User: {interaction.user} - Script ran successfully")
         else:
-         log_conversation(message, result)  
-         await interaction.channel.send(f"The code output is : {result}")
-         print(result)
-
+            await interaction.channel.send(f"prompt:{generated_code} ")
+            logging.info(f"User: {interaction.user} - Code Output: {result}")
     except Exception as e:
-        print(f"An error occurred: {e}") 
-        
+        await interaction.response.send_message(f"An error occurred: {e}")
+        logging.error(f"An error occurred: {e}")
 
 async def execute_code(code: str, language: str) -> str:
     try:
@@ -338,8 +340,8 @@ async def run_python_code(code: str) -> str:
 
 
 @bot.tree.command(name="summarize", description="Summarize a text using the current LLM.")
-async def summarize(interaction: discord.Interaction, text: str, message: Message):
-
+async def summarize(interaction: discord.Interaction, text: str):
+    message = interaction.user
     try:
         selected_model = bot_settings["model"]
 
@@ -369,12 +371,15 @@ async def summarize(interaction: discord.Interaction, text: str, message: Messag
                 model=selected_model
             )
             summary = chat_completion.choices[0].message.content
-            log_conversation(message, summarize)  
+
+            # Log the interaction, not the text string
+            logging.info(f"User: {message} - Model: {selected_model} - Summary: {summary}")
+
             await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
 
     except Exception as e:
         await interaction.response.send_message(f"An error occurred: {e}")
-
+        logging.error(f"An error occurred: {e}")
 
 @bot.tree.command(name="play_audio", description="Join a voice channel and play audio. (Authorized users only)")
 async def play_audio(interaction: discord.Interaction, channel: discord.VoiceChannel):
@@ -509,8 +514,9 @@ async def on_message(message: Message):
                 )
                 generated_text = chat_completion.choices[0].message.content
                 lobotomised_generated_text = generated_text[:2000] 
-            log_conversation(message, generated_text)  
             await message.channel.send(lobotomised_generated_text.strip())
+            # Log the skibidi
+            logging.info(f"User: {message.author} - Message: {message.content} - Generated Text: {generated_text[:200]}")
             print(f"user:{message.author}\n message:{message.content}\n output:{generated_text}")
 
             messages.append({"role": "user", "content": message.content})
@@ -522,18 +528,37 @@ async def on_message(message: Message):
             print(e)
 
 
-
+@bot.command(name="show_log", description="Send the last 2000 characters of the bot log.")
+async def show_log(ctx):
+    try:
+        with open('bot_log.txt', 'r') as log_file:
+            log_file.seek(0, 2)  # Move to the end of the file
+            file_size = log_file.tell()
+            offset = max(0, file_size - 1900)
+            log_file.seek(offset)
+            log_content = log_file.read()
+            
+            if len(log_content) == 0:
+                await ctx.send("The log file is empty.")
+            else:
+                await ctx.send(f"```{log_content[-1900:]}```")
+    except Exception as e:
+        await ctx.send(f"An error occurred while reading the log file: {e}")
+        logging.error(f"An error occurred while reading the log file: {e}")
 # --- Event Handling ---
 
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
+    logging.error(f'Logged in as {bot.user.name}')
     await bot.tree.sync(guild=None)
     print("Application commands synced.")
     print("Connected to the following guilds:")
+    logging.error("Application commands synced.")
+    logging.error("Connected to the following guilds:")
     for guild in bot.guilds:
         print(f"  - {guild.name} (ID: {guild.id})")
-
+        logging.error(f"  - {guild.name} (ID: {guild.id})")
 
 # Run the bot
 bot.run(DISCORD_TOKEN)
