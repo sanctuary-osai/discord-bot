@@ -72,13 +72,6 @@ logging.basicConfig(filename='bot_log.txt', level=logging.INFO,
 
 # --- Helper Function for Checking Authorization ---
 
-def log_conversation(message: Message, generated_text: str, filename="conversation_log.txt"):
-  log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nuser:{message.author}\n message:{message.content}\n output:{generated_text}\n\n"
-
-  with open(filename, "a", encoding="utf-8") as file:
-    file.write(log_entry)
-
-
 def is_authorized(interaction: discord.Interaction):
     """Check if the user has permission to use the command."""
     user = interaction.user
@@ -263,9 +256,6 @@ async def create_code(interaction: discord.Interaction, code_request: str):
     if not is_authorized(interaction):
         await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
-
-    await interaction.response.defer(ephemeral=True)
-
     try:
         # 1. Use Groq to generate code with execution instructions
         prompt = f"""Write a {code_language} code snippet that will create and run: {code_request}
@@ -287,15 +277,15 @@ async def create_code(interaction: discord.Interaction, code_request: str):
         await interaction.channel.send(f"prompt: {code_request}")
         
         # Log the shit
-        logging.info(f"User: {interaction.user} - Prompt: {code_request} - Generated Code: {generated_code_lobotomised}")
+        logging.info(f"User: {interaction.user} - Prompt: {code_request} - Generated Code: {generated_code}")
         # 3. generate the generated code :fire:
         result = await execute_code(generated_code, code_language)
         # 4. tell user shit
         if result == "No output.":
             await interaction.channel.send("Script ran")
-            logging.info(f"User: {interaction.user} - Script ran successfully")
+            logging.info(f"User: {interaction.user} - {result}")
         else:
-            await interaction.channel.send(f"prompt:{generated_code} ")
+            await interaction.channel.send(f"result:{result}")
             logging.info(f"User: {interaction.user} - Code Output: {result}")
     except Exception as e:
         await interaction.response.send_message(f"An error occurred: {e}")
@@ -528,37 +518,43 @@ async def on_message(message: Message):
             print(e)
 
 
-@bot.command(name="show_log", description="Send the last 2000 characters of the bot log.")
-async def show_log(ctx):
+@bot.tree.command(name="show_log", description="Send the last 2000 characters of the bot log.")
+async def show_log(interaction: discord.Interaction):
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        logging.error(f"{interaction.user} blocked from using show_log") 
+        return
+
     try:
         with open('bot_log.txt', 'r') as log_file:
-            log_file.seek(0, 2)  # Move to the end of the file
+            log_file.seek(0, 2) 
             file_size = log_file.tell()
-            offset = max(0, file_size - 1900)
+            offset = max(0, file_size - 2000)
             log_file.seek(offset)
             log_content = log_file.read()
             
             if len(log_content) == 0:
-                await ctx.send("The log file is empty.")
+                await interaction.response.send_message("The log file is empty.")
             else:
-                await ctx.send(f"```{log_content[-1900:]}```")
+                await interaction.response.send_message(f"```{log_content[-2000:]}```")
     except Exception as e:
-        await ctx.send(f"An error occurred while reading the log file: {e}")
-        logging.error(f"An error occurred while reading the log file: {e}")
+        await interaction.response.send_message(f"An error occurred while reading the log file: {e}")
+        logging.error(f"An error occurred while reading the log file: {e}") 
+
 # --- Event Handling ---
 
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
-    logging.error(f'Logged in as {bot.user.name}')
+    logging.info(f'Logged in as {bot.user.name}')
     await bot.tree.sync(guild=None)
     print("Application commands synced.")
     print("Connected to the following guilds:")
-    logging.error("Application commands synced.")
-    logging.error("Connected to the following guilds:")
+    logging.info("Application commands synced.")
+    logging.info("Connected to the following guilds:")
     for guild in bot.guilds:
         print(f"  - {guild.name} (ID: {guild.id})")
-        logging.error(f"  - {guild.name} (ID: {guild.id})")
+        logging.info(f"  - {guild.name} (ID: {guild.id})")
 
 # Run the bot
 bot.run(DISCORD_TOKEN)
