@@ -12,9 +12,9 @@ import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
 import asyncio
-import io
-import contextlib
 import logging
+from bs4 import BeautifulSoup  # Import BeautifulSoup for web scraping
+from urllib.parse import urljoin  # Import for building absolute URLs
 
 # Load environment variables from .env file
 load_dotenv()
@@ -82,6 +82,7 @@ def is_authorized(interaction: discord.Interaction):
 #    if user.id == interaction.guild.owner_id:
 #        return True
     return False
+
 # --- Application Commands ---
 
 @bot.tree.command(name="serverinfo", description="Get information about the server.")
@@ -371,6 +372,73 @@ async def summarize(interaction: discord.Interaction, text: str):
         await interaction.response.send_message(f"An error occurred: {e}")
         logging.error(f"An error occurred: {e}")
 
+
+
+@bot.tree.command(name="summarize_website", description="summarize a website.")
+async def summarize_website(interaction: discord.Interaction, website_url: str):
+#    if not is_authorized(interaction):
+#        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+#        return
+    await interaction.response.defer() 
+    try:
+        response = requests.get(website_url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Extract relevant text from the website
+        extracted_text = ""
+        for paragraph in soup.find_all('p'):
+            extracted_text += paragraph.get_text() + "\n"
+
+        if not extracted_text.strip():  # Check if extracted_text is empty
+            await interaction.response.send_message(content="Error: No text found on the website.") 
+            return 
+
+        # Use the LLM to summarize the extracted text
+        selected_model = bot_settings["model"]
+        if extracted_text == None:
+         if selected_model in gemini_models:
+            try:
+                # Create a Gemini model instance (do this once, maybe outside the function)
+                gemini_model = gemini.GenerativeModel(selected_model) 
+
+                # Use the model instance to generate content
+                response = gemini_model.generate_content( 
+                    f"Summarize the following text:\n\n{extracted_text}",
+                )
+
+                # Extract the summary from the response
+                summary = response.text
+                await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
+            except Exception as e:
+                await interaction.response.send_message(f"An error occurred while processing the request: {e}")
+
+        else:  # Use Groq API for summarization
+            lobotomised_extracted_text = extracted_text[:10000] 
+            system_prompt = bot_settings["system_prompt"]
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Summarize the following text in detail and only output the summary itself for example do not add things 'like this is a summary':\n\n{lobotomised_extracted_text}"}
+                ],
+                model="llama3-8b-8192"
+            )
+            summary = chat_completion.choices[0].message.content
+            
+
+            # Log the interaction, not the text string
+            logging.info(f"User: {interaction.user} - Website: {website_url} - Model: {selected_model} extracted text: {extracted_text} - Summary: {summary}")
+            lobotomised_summary = summary[:1900]
+            await interaction.followup.send(f"Summary of <{website_url}>:\n```\n{lobotomised_summary}\n```")
+
+    except requests.exceptions.RequestException as e:
+        await interaction.response.send_message(f"An error occurred while fetching the website: {e}")
+    except Exception as e:
+        await interaction.response.send_message(f"An error occurred: {e}")
+        logging.error(f"An error occurred: {e}")
+
+
 @bot.tree.command(name="play_audio", description="Join a voice channel and play audio. (Authorized users only)")
 async def play_audio(interaction: discord.Interaction, channel: discord.VoiceChannel):
     """Joins a specified voice channel and plays an audio file.
@@ -455,6 +523,31 @@ async def toggle_llm(interaction: discord.Interaction):
     new_state = "OFF" if not bot_settings["llm_enabled"] else "ON"
     await interaction.response.send_message(f"LLM is now turned {new_state} for the entire bot.")
 
+
+@bot.tree.command(name="show_log", description="Send the last 2000 characters of the bot log.")
+async def show_log(interaction: discord.Interaction):
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        logging.error(f"{interaction.user} blocked from using show_log") 
+        return
+
+    try:
+        with open('bot_log.txt', 'r') as log_file:
+            log_file.seek(0, 2) 
+            file_size = log_file.tell()
+            offset = max(0, file_size - 2000)
+            log_file.seek(offset)
+            log_content = log_file.read()
+            
+            if len(log_content) == 0:
+                await interaction.response.send_message("The log file is empty.")
+            else:
+                await interaction.response.send_message(f"```{log_content[-2000:]}```")
+    except Exception as e:
+        await interaction.response.send_message(f"An error occurred while reading the log file: {e}")
+        logging.error(f"An error occurred while reading the log file: {e}") 
+
+
 # --- Message Handling --- 
 
 @bot.event
@@ -516,30 +609,6 @@ async def on_message(message: Message):
         except Exception as e:
             await message.channel.send(f"An error occurred: {e}")
             print(e)
-
-
-@bot.tree.command(name="show_log", description="Send the last 2000 characters of the bot log.")
-async def show_log(interaction: discord.Interaction):
-    if not is_authorized(interaction):
-        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
-        logging.error(f"{interaction.user} blocked from using show_log") 
-        return
-
-    try:
-        with open('bot_log.txt', 'r') as log_file:
-            log_file.seek(0, 2) 
-            file_size = log_file.tell()
-            offset = max(0, file_size - 2000)
-            log_file.seek(offset)
-            log_content = log_file.read()
-            
-            if len(log_content) == 0:
-                await interaction.response.send_message("The log file is empty.")
-            else:
-                await interaction.response.send_message(f"```{log_content[-2000:]}```")
-    except Exception as e:
-        await interaction.response.send_message(f"An error occurred while reading the log file: {e}")
-        logging.error(f"An error occurred while reading the log file: {e}") 
 
 # --- Event Handling ---
 

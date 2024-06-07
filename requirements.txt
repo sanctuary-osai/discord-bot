@@ -3,3 +3,4 @@ groq
 google-generativeai
 PyNaCl
 python-dotenv
+beautifulsoup4
