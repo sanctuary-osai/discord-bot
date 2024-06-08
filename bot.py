@@ -3,7 +3,7 @@
 import os
 import discord
 from discord.ext import commands
-from discord import Message
+from discord import Message, Embed
 from dotenv import load_dotenv
 from groq import Groq
 from collections import defaultdict
@@ -14,8 +14,10 @@ import google.generativeai as gemini
 import asyncio
 import logging
 from bs4 import BeautifulSoup  # Import BeautifulSoup for web scraping
-from urllib.parse import urljoin  # Import for building absolute URLs
-
+from hunger_games import HungerGames, Participant 
+import random
+import io
+from contextlib import redirect_stdout
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -84,6 +86,103 @@ def is_authorized(interaction: discord.Interaction):
     return False
 
 # --- Application Commands ---
+
+
+
+
+@bot.tree.command(name="hunger_games", description="Start a Hunger Games simulation with Discord users.")
+async def hunger_games(interaction: discord.Interaction, *, users: str):
+    """Start a Hunger Games simulation.
+    Mention Discord users separated by spaces. Example:
+    /hunger_games @user1 @user2 @user3 @user4
+    """
+
+    # Respond to the interaction first to create the message
+    await interaction.response.send_message(f"Gathering tributes... This might take a moment.")
+
+    # Retrieve mentioned users from the interaction data
+    mentioned_users = interaction.data['resolved']['members'].values()
+
+    if len(mentioned_users) < 2:
+        await interaction.followup.send("Please mention at least two Discord users to participate.")
+        return
+
+    # Create Participants using user IDs
+    participants = [Participant(user['user']['username'], user['user']['id'], user['user']['avatar']) for user in mentioned_users]
+
+    game = HungerGames(participants)
+    await interaction.followup.send("Let the games begin!")
+
+    round_number = 1
+    while len(game.participants) > 1:
+        embed = Embed(title=f"🔥 The Hunger Games - Round {round_number} 🔥", color=discord.Color.red())
+        round_messages = []
+
+        for participant in game.participants[:]:
+            if len(game.participants) <= 1:
+                break
+
+            if participant in game.participants:
+                scenario = random.choice(game.scenarios)
+                if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario]:
+                    valid_others = [p for p in game.participants if p != participant and p in game.participants]
+                    if valid_others:
+                        other = random.choice(valid_others)
+                        output = io.StringIO()
+                        with redirect_stdout(output):
+                            participant.interact(scenario, [other])
+
+                        # Find the user object using the stored user ID
+                        user = interaction.guild.get_member(participant.user_id)
+
+                        if user:  # Check if the user was found
+                            round_messages.append(f"{user.mention}: {output.getvalue().strip()}   {other.name}")
+                            embed.set_thumbnail(url=user.avatar.url)
+                        else:
+                            round_messages.append(f"{participant.name}: {output.getvalue().strip()}  {other.name}")
+                else:
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        participant.interact(scenario)
+
+                    # Find the user object using the stored user ID
+                    user = interaction.guild.get_member(participant.user_id)
+
+                    if user:  # Check if the user was found
+                        round_messages.append(f"{user.mention}: {output.getvalue().strip()}")
+                        embed.set_thumbnail(url=user.avatar.url)
+                    else:
+                        round_messages.append(f"{participant.name}: {output.getvalue().strip()}")
+
+        embed.description = "\n\n".join(round_messages)
+        await interaction.channel.send(embed=embed)
+
+        # --- Wait for User Response ---
+        await interaction.channel.send("Type 'next' to continue to the next round...")
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel and m.content.lower() == 'next'
+        try:
+            await bot.wait_for('message', check=check, timeout=60)
+        except asyncio.TimeoutError:
+            await interaction.channel.send("The game has timed out due to inactivity.")
+            return
+
+        round_number += 1
+
+    await interaction.channel.send("The Hunger Games have ended!")
+    if game.participants:
+        winner = game.participants[0]
+        embed = Embed(title="🏆 The Victor 🏆", color=discord.Color.gold())
+        embed.description = f"{winner.name} has won the Hunger Games!"
+
+        # Find the winner's user object
+        winner_user = interaction.guild.get_member(winner.user_id) 
+        if winner_user:
+            embed.set_thumbnail(url=winner_user.avatar.url)  # Set winner's avatar as thumbnail
+
+        await interaction.channel.send(embed=embed)
+    else:
+        await interaction.channel.send("There are no survivors.")
 
 @bot.tree.command(name="serverinfo", description="Get information about the server.")
 async def serverinfo(interaction: discord.Interaction):
