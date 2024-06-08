@@ -599,7 +599,7 @@ async def on_message(message: Message):
                 lobotomised_generated_text = generated_text[:2000] 
             await message.channel.send(lobotomised_generated_text.strip())
             # Log the skibidi
-            logging.info(f"User: {message.author} - Message: {message.content} - Generated Text: {generated_text[:200]}")
+            logging.info(f"User: {message.author} - Message: {message.content} - Generated Text: {generated_text}")
             print(f"user:{message.author}\n message:{message.content}\n output:{generated_text}")
 
             messages.append({"role": "user", "content": message.content})
