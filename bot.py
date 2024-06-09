@@ -84,7 +84,7 @@ def is_authorized(interaction: discord.Interaction):
     if any(role.id in authorized_roles for role in user.roles):
         return True
 #    if user.id == interaction.guild.owner_id:
-#        return True
+#        return TrueF
     return False
 
 # --- Application Commands ---
@@ -103,9 +103,10 @@ async def separate(interaction: discord.Interaction, audio_file: discord.Attachm
             with open(file_path, 'rb') as f:
                 data = {
                     'api_token': MVSEP_API_KEY,
-                    'sep_type': '35',
+                    'sep_type': '40',
                     'add_opt1': '5', 
-                    'audiofile': f
+                    'audiofile': f,
+                    'output_format': "1"
                 }
                 async with session.post("https://mvsep.com/api/separation/create", headers={'Authorization': f'Bearer {MVSEP_API_KEY}'}, data=data) as response:
                     if response.status == 200:
@@ -175,7 +176,12 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
                 break
 
             scenario = game.choose_scenario(participant) 
-            if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario, game.item_kill_scenario, game.sleeping_scenario, game.help_scenario,]:
+            if scenario in [
+            game.kill_scenario, game.form_alliance_scenario,
+            game.betrayal_scenario, game.steal_supplies_scenario,
+            game.item_kill_scenario, game.sleeping_scenario,
+            game.help_scenario, game.trap_scenario, game.mutual_rescue_scenario
+            ]:
                 valid_others = [p for p in game.participants if p != participant]
                 if valid_others:
                     other = random.choice(valid_others)

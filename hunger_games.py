@@ -44,7 +44,7 @@ class HungerGames:
             self.find_water_scenario, self.injure_scenario, self.fart_scenario, self.poop_scenario,
             self.item_kill_scenario, self.eat_berries_scenario, self.tripping_scenario,
             self.sleeping_scenario, self.sponsor_scenario, self.tree_sleep_scenario, self.haunt_scenario,
-            self.fire_scenario, self.help_scenario
+            self.fire_scenario, self.help_scenario, self.mutual_rescue_scenario
         ]
 
     def fire_scenario(self, participant):
@@ -111,7 +111,10 @@ class HungerGames:
         participant.betray(other)
         print(f"{participant.name} betrays {other.name} during the night and kills them.")
         self.participants.remove(other)
-
+    def mutual_rescue_scenario(self, participant, others):
+        other = others[0]
+        participant.form_alliance(other)
+        print(f"{participant.name} and {other} helped each other to take down a wild animal")
 
     def steal_supplies_scenario(self, participant, others):
         other = others[0]
@@ -136,8 +139,8 @@ class HungerGames:
     def choose_scenario(self, participant):
         weights = []
         for scenario in self.scenarios:
-            if scenario in [self.form_alliance_scenario, self.help_scenario, self.sleeping_scenario]:
-                weight = 1 if participant.allies else 5
+            if scenario in [self.form_alliance_scenario, self.help_scenario, self.sleeping_scenario, self.mutual_rescue_scenario]:
+                weight =   1 if participant.allies else 5
             elif scenario in [self.betrayal_scenario, self.kill_scenario, self.item_kill_scenario, self.steal_supplies_scenario]:
                 weight = 1 if any(other in participant.allies for other in self.participants) else 5
             else:
