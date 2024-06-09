@@ -1,10 +1,33 @@
 import random
+items = [
+    "a first-aid kit",
+    "a hunting knife",
+    "a water purifier",
+    "a rope",
+    "a map of the arena",
+    "a backpack full of food",
+    "a set of camouflage clothing",
+    "a compass",
+    "a torch",
+    "a bow and arrow",
+    "a sturdy axe",
+    "a metal pan",
+    "a bottle of water",
+    "a whistle",
+    "a magnifying glass",
+    "a fishing rod",
+    "a thermal blanket",
+    "a sturdy shovel",
+    "a set of waterproof matches"
+]
 
 class Participant:
-    def __init__(self, name, user_id, image_link=None):
+    def __init__(self, name, user_id, avatar=None):
         self.name = name
-        self.user_id = user_id
-        self.image_link = image_link
+        self.user_id = user_id 
+        self.avatar = avatar
+        self.alive = True
+        self.allies = []
 
     def __repr__(self):
         return self.name
@@ -28,14 +51,52 @@ class HungerGames:
             self.steal_supplies_scenario,
             self.find_water_scenario,
             self.injure_scenario,
-            self.fart_scenario
+            self.fart_scenario,
+            self.poop_scenario,
+            self.item_kill_scenario,
+            self.eat_berries_scenario,
+            self.tripping_scenario,
+            self.sleeping_scenario,
+            self.sponsor_scenario,
+            self.tree_sleep_scenario,
+            
+        
         ]
+
+    def tree_sleep_scenario(self, participant):
+        print(f"{participant.name} slept in a tree for shelter")
+
+    def tripping_scenario(self, participant):
+        trip_item = random.choice(items)
+        print(f"{participant.name} tripped on {trip_item}")
+
+    def beast_scenario(self, participant):
+        print(f"{participant.name} is attacked by a wild beast and is eliminated.")
+        self.participants.remove(participant)
 
     def fart_scenario(self, participant):
         print(f"{participant.name} farted.")
-        
+
+    def eat_berries_scenario(self, participant):
+        if random.random() < 0.5:
+            print(f"{participant.name} found some berries and ate them. They were delicious!")
+        else:
+            print(f"{participant.name} found some berries and ate them. Unfortunately, they were poisonous! {participant.name} is eliminated.")
+            self.participants.remove(participant)
+
+    def poop_scenario(self, participant):
+        print(f"{participant.name} pooped too hard.")
+        self.participants.remove(participant)
+
+    def item_kill_scenario(self, participant, others):
+        other = others[0]
+        murder_item = random.choice(items)
+        print(f"{participant.name} kills {other.name} with {murder_item}.")
+        self.participants.remove(other)
+
     def find_supplies_scenario(self, participant):
-        print(f"{participant.name} stumbles upon a hidden cache of supplies.")
+        found_item = random.choice(items)
+        print(f"{participant.name} stumbles upon {found_item}.")
 
     def kill_scenario(self, participant, others):
         other = others[0]
@@ -68,7 +129,14 @@ class HungerGames:
 
     def injure_scenario(self, participant):
         print(f"{participant.name} gets injured while trying to climb a tree.")
+   
+    def sponsor_scenario(self, participant):
+        sponsor_item = random.choice(items)
+        print(f"{participant.name} was given {sponsor_item} by an unknown sponsor")
 
+    def sleeping_scenario(self, participant, others):
+        other = others[0]
+        print(f"{participant.name} slept with {other.name}")
 
     def run_round(self):
         print("A new round begins!")

@@ -18,10 +18,12 @@ from hunger_games import HungerGames, Participant
 import random
 import io
 from contextlib import redirect_stdout
+import aiohttp
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+MVSEP_API_KEY = os.getenv('MVSEP_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') 
 WHISPER_CPP_PATH = os.getenv('WHISPER_CPP_PATH')  # Path to the whisper.cpp executable
 WHISPER_MODEL = os.getenv('WHISPER_CPP_MODEL')   # Specify the Whisper model you want to use
@@ -46,7 +48,7 @@ bot_settings = {
     "model": "llama3-70b-8192",
     "system_prompt": "You are a helpful and friendly AI assistant.",
     "context_messages": 5,
-    "llm_enabled": True  # LLM is enabled by default for the entire bot
+    "llm_enabled": False  # LLM is enabled by default for the entire bot
 }
 code_language = "python"
 # Define valid model names for Groq and Gemini
@@ -87,7 +89,56 @@ def is_authorized(interaction: discord.Interaction):
 
 # --- Application Commands ---
 
+@bot.tree.command(name="separate", description="Separate uploaded audio into its components")
+async def separate(interaction: discord.Interaction, audio_file: discord.Attachment):
+    await interaction.response.send_message("Separating audio... This might take a moment.") 
+    try:
+        # Download the file
+        file_path = f"mvsep/{audio_file.filename}"
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        await audio_file.save(file_path)
 
+        # Sending the file to MVSEP API
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, 'rb') as f:
+                data = {
+                    'api_token': MVSEP_API_KEY,
+                    'sep_type': '35',
+                    'add_opt1': '5', 
+                    'audiofile': f
+                }
+                async with session.post("https://mvsep.com/api/separation/create", headers={'Authorization': f'Bearer {MVSEP_API_KEY}'}, data=data) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        job_hash = result['data']['hash']
+
+                        # Wait for the job to finish
+                        while True:
+                            await asyncio.sleep(5)  # Check every 5 seconds
+                            async with session.get(f'https://mvsep.com/api/separation/get?hash={job_hash}') as status_response:
+                                if status_response.status == 200:
+                                    status_result = await status_response.json()
+                                    if status_result['status'] == 'done':
+                                        separated_files = status_result['data']['files']
+                                        urls = [file['url'] for file in separated_files]
+                                        await interaction.followup.send(f"Audio separated successfully! Download them here:\n" + "\n".join(urls))
+                                        break
+                                    elif status_result['status'] == 'failed':
+                                        await interaction.followup.send(f"Audio separation failed: {status_result['data']['message']}")
+                                        break
+                                else:
+                                    await interaction.followup.send(f"Failed to check status. Status code: {status_response.status}")
+                                    break
+
+                    else:
+                        await interaction.followup.send(f"Failed to separate audio. Status code: {response.status}")
+        
+        # Clean up the downloaded file
+        os.remove(file_path)
+    except aiohttp.ClientConnectorError as e:
+        await interaction.followup.send(f"Error connecting to the MVSEP API: {e}")
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}")
 
 
 @bot.tree.command(name="hunger_games", description="Start a Hunger Games simulation with Discord users.")
@@ -124,7 +175,7 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
 
             if participant in game.participants:
                 scenario = random.choice(game.scenarios)
-                if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario]:
+                if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario, game.item_kill_scenario, game.sleeping_scenario]:
                     valid_others = [p for p in game.participants if p != participant and p in game.participants]
                     if valid_others:
                         other = random.choice(valid_others)
@@ -132,37 +183,35 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
                         with redirect_stdout(output):
                             participant.interact(scenario, [other])
 
-                        # Find the user object using the stored user ID
+                        # Find the user object using the stored user ID    
                         user = interaction.guild.get_member(participant.user_id)
-
-                        if user:  # Check if the user was found
-                            round_messages.append(f"{user.mention}: {output.getvalue().strip()}   {other.name}")
-                            embed.set_thumbnail(url=user.avatar.url)
+                        if user:
+                            round_messages.append(f"{output.getvalue().strip()}")
+                            embed.set_thumbnail(url=user.avatar.url) # Set thumbnail here
                         else:
-                            round_messages.append(f"{participant.name}: {output.getvalue().strip()}  {other.name}")
+                            round_messages.append(f"{output.getvalue().strip()}")
+
                 else:
                     output = io.StringIO()
                     with redirect_stdout(output):
                         participant.interact(scenario)
 
-                    # Find the user object using the stored user ID
                     user = interaction.guild.get_member(participant.user_id)
-
-                    if user:  # Check if the user was found
-                        round_messages.append(f"{user.mention}: {output.getvalue().strip()}")
-                        embed.set_thumbnail(url=user.avatar.url)
+                    if user:
+                        round_messages.append(f"{output.getvalue().strip()}")
+                        embed.set_thumbnail(url=user.avatar.url)  # Set thumbnail here
                     else:
-                        round_messages.append(f"{participant.name}: {output.getvalue().strip()}")
+                        round_messages.append(f"{output.getvalue().strip()}")
 
         embed.description = "\n\n".join(round_messages)
         await interaction.channel.send(embed=embed)
 
         # --- Wait for User Response ---
-        await interaction.channel.send("Type 'next' to continue to the next round...")
+        await interaction.channel.send("Type 'next' to continue...")
         def check(m):
             return m.author == interaction.user and m.channel == interaction.channel and m.content.lower() == 'next'
         try:
-            await bot.wait_for('message', check=check, timeout=60)
+            await bot.wait_for('message', check=check, timeout=360)
         except asyncio.TimeoutError:
             await interaction.channel.send("The game has timed out due to inactivity.")
             return
