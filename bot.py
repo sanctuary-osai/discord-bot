@@ -141,6 +141,13 @@ async def separate(interaction: discord.Interaction, audio_file: discord.Attachm
     except Exception as e:
         await interaction.followup.send(f"An error occurred: {e}")
 
+@bot.tree.command(name="kill", description="murder")
+async def kill(interaction: discord.Interaction, user: str):
+  """
+  murder
+  """
+
+  await interaction.response.send_message(f"{user} was killed")
 
 @bot.tree.command(name="hunger_games", description="Start a Hunger Games simulation with Discord users.")
 async def hunger_games(interaction: discord.Interaction, *, users: str):
