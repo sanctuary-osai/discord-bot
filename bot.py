@@ -164,6 +164,7 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
     game = HungerGames(participants)
     await interaction.followup.send("Let the games begin!")
 
+
     round_number = 1
     while len(game.participants) > 1:
         embed = Embed(title=f"🔥 The Hunger Games - Round {round_number} 🔥", color=discord.Color.red())
@@ -173,35 +174,32 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
             if len(game.participants) <= 1:
                 break
 
-            if participant in game.participants:
-                scenario = random.choice(game.scenarios)
-                if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario, game.item_kill_scenario, game.sleeping_scenario]:
-                    valid_others = [p for p in game.participants if p != participant and p in game.participants]
-                    if valid_others:
-                        other = random.choice(valid_others)
-                        output = io.StringIO()
-                        with redirect_stdout(output):
-                            participant.interact(scenario, [other])
-
-                        # Find the user object using the stored user ID    
-                        user = interaction.guild.get_member(participant.user_id)
-                        if user:
-                            round_messages.append(f"{output.getvalue().strip()}")
-                            embed.set_thumbnail(url=user.avatar.url) # Set thumbnail here
-                        else:
-                            round_messages.append(f"{output.getvalue().strip()}")
-
-                else:
+            scenario = game.choose_scenario(participant) 
+            if scenario in [game.kill_scenario, game.form_alliance_scenario, game.betrayal_scenario, game.steal_supplies_scenario, game.item_kill_scenario, game.sleeping_scenario, game.help_scenario,]:
+                valid_others = [p for p in game.participants if p != participant]
+                if valid_others:
+                    other = random.choice(valid_others)
                     output = io.StringIO()
                     with redirect_stdout(output):
-                        participant.interact(scenario)
+                        participant.interact(scenario, [other])
 
                     user = interaction.guild.get_member(participant.user_id)
                     if user:
                         round_messages.append(f"{output.getvalue().strip()}")
-                        embed.set_thumbnail(url=user.avatar.url)  # Set thumbnail here
+                        embed.set_thumbnail(url=user.avatar.url)
                     else:
                         round_messages.append(f"{output.getvalue().strip()}")
+            else:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    participant.interact(scenario)
+
+                user = interaction.guild.get_member(participant.user_id)
+                if user:
+                    round_messages.append(f"{output.getvalue().strip()}")
+                    embed.set_thumbnail(url=user.avatar.url)
+                else:
+                    round_messages.append(f"{output.getvalue().strip()}")
 
         embed.description = "\n\n".join(round_messages)
         await interaction.channel.send(embed=embed)
