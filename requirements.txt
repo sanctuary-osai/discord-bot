@@ -5,3 +5,5 @@ PyNaCl
 python-dotenv
 beautifulsoup4
 lyricsgenius
+yt-dlp
+edge-tts
