@@ -3,7 +3,7 @@
 import os
 import discord
 from discord.ext import commands
-from discord import Message, Embed
+from discord import Message, Embed, Interaction, File
 from dotenv import load_dotenv
 from groq import Groq
 from collections import defaultdict
@@ -11,27 +11,41 @@ import requests
 import json
 from datetime import datetime, timedelta
 import google.generativeai as gemini
+import textwrap
+import traceback
 import asyncio
 import logging
 from bs4 import BeautifulSoup  # Import BeautifulSoup for web scraping
 from hunger_games import HungerGames, Participant 
 import random
+import edge_tts
 import io
 from contextlib import redirect_stdout
 import aiohttp
+import lyricsgenius
+from timeit import default_timer as timer 
+from typing import Any
+import json
+import ee
+from google.oauth2 import service_account
+from PIL import Image
+from PIL.ExifTags import TAGS
+import yt_dlp
 # Load environment variables from .env file
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 MVSEP_API_KEY = os.getenv('MVSEP_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') 
-WHISPER_CPP_PATH = os.getenv('WHISPER_CPP_PATH')  # Path to the whisper.cpp executable
-WHISPER_MODEL = os.getenv('WHISPER_CPP_MODEL')   # Specify the Whisper model you want to use
+GENIUS_API_TOKEN = os.getenv('GENIUS_API_TOKEN')
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
 # Initialize the Google Generative AI client
 gemini.configure(api_key=GOOGLE_API_KEY)
+
+# Initialize genius shit
+genius = lyricsgenius.Genius("GENIUS_API_TOKEN")
 
 # Initialize the bot with intents
 intents = discord.Intents.default()
@@ -40,15 +54,17 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Authorized users/roles (replace with actual IDs)
-authorized_users = [936673139419664414]   # Replace with user IDs
-authorized_roles = [1198707036070871102]   # Replace with role IDs
+authorized_users = [936673139419664414]
+authorized_roles = [1198707036070871102] 
+
+# responses to on message
 
 # Bot-wide settings
 bot_settings = {
     "model": "llama3-70b-8192",
     "system_prompt": "You are a helpful and friendly AI assistant.",
     "context_messages": 5,
-    "llm_enabled": False  # LLM is enabled by default for the entire bot
+    "llm_enabled": False 
 }
 code_language = "python"
 # Define valid model names for Groq and Gemini
@@ -58,18 +74,20 @@ groq_models = [
     "gemma-7b-it",
     "mixtral-8x7b-32768"
 ]
+
 # Define valid model names for Gemini
 gemini_models = [
     "gemini-1.5-flash",
-    "gemini-1.5-pro-latest" 
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-pro-2m-latest" 
 ]
 
 
     # --- Conversation Data (Important!) chatting shit
 conversation_data = defaultdict(lambda: {"messages": []}) 
 
-# --- login shit
-
+# --- loggin shit
+LOG_CHANNEL_ID = 1251625595431813144
 logging.basicConfig(filename='bot_log.txt', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -88,17 +106,106 @@ def is_authorized(interaction: discord.Interaction):
     return False
 
 # --- Application Commands ---
+@bot.tree.command(name="eval", description="Evaluate Python code. )")
+async def eval_code(interaction: discord.Interaction, code: str):
+    """
+    Evaluates Python code provided by the bot owner. 
+
+    Features:
+     - Code block formatting
+     - Standard output capture
+     - Error handling and traceback display
+     - Result truncation for large outputs
+     - Execution time measurement
+    """
+
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        return
+
+    env = {
+        "bot": bot,
+        "discord": discord,
+        "commands": commands,
+        "interaction": interaction,
+        "channel": interaction.channel,
+        "guild": interaction.guild,
+        "message": interaction.message,
+    }
+
+    code = code.strip("`")
+
+    stdout = io.StringIO()
+
+    start_time = timer() 
+    try:
+        with redirect_stdout(stdout):
+            exec(
+                f"async def func():\n{textwrap.indent(code, '    ')}", env
+            )
+            result = await env["func"]()  
+            result_str = str(result) if result is not None else "No output."
+
+    except Exception as e:
+
+        result_str = "".join(
+            traceback.format_exception(type(e), e, e.__traceback__)
+        )
+
+    end_time = timer() 
+    execution_time = (end_time - start_time) * 1000 
+
+
+    if len(result_str) > 1900: 
+        result_str = result_str[:1900] + "... (Output truncated)"
+
+
+    await interaction.response.send_message(
+        f"```python\n{code}\n```\n**Output:**\n```\n{result_str}\n```\n**Execution time:** {execution_time:.2f} ms",
+        ephemeral=True,
+    )
+@bot.command(name="lyrics", description="Search for song lyrics.")
+async def lyrics(ctx, *, song_title: str):
+    async with ctx.typing():
+        try:
+            search_results = genius.search_songs(song_title)
+
+            if not search_results:
+                await ctx.send(f"No lyrics found for '{song_title}'.")
+                return
+            best_match = search_results[0] 
+            for result in search_results:
+                if song_title.lower() == result.title.lower():
+                    best_match = result
+                    brea
+
+            song = genius.song(best_match.id) 
+            lyrics_text = song.lyrics
+            if len(lyrics_text) > 2000:  
+                lyrics_text = lyrics_text[:2000] + "... (Lyrics truncated)"
+            
+            await ctx.send(f"```\n{lyrics_text}\n```") 
+
+        except Exception as e:
+            await ctx.send(f"An error occurred while fetching lyrics: {e}")
+            print(f"Error fetching lyrics: {e}")
+
+MAX_AUDIO_SIZE = 15 * 60 * 1024 * 1024  
 
 @bot.tree.command(name="separate", description="Separate uploaded audio into its components")
 async def separate(interaction: discord.Interaction, audio_file: discord.Attachment):
-    await interaction.response.send_message("Separating audio... This might take a moment.") 
+
+    if audio_file.size > MAX_AUDIO_SIZE:
+        logging.error(f"User: {interaction.user} - Error: audio file over 15 minutes")
+        await interaction.response.send_message("Sorry, audio files must be under 15 minutes long.", ephemeral=True)
+        return
+    logging.info(f"User: {interaction.user} - seperated audio")
+    await interaction.response.send_message("Separating audio... This might take a moment.", ephemeral=True)
+
     try:
-        # Download the file
         file_path = f"mvsep/{audio_file.filename}"
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         await audio_file.save(file_path)
-
-        # Sending the file to MVSEP API
         async with aiohttp.ClientSession() as session:
             with open(file_path, 'rb') as f:
                 data = {
@@ -113,34 +220,33 @@ async def separate(interaction: discord.Interaction, audio_file: discord.Attachm
                         result = await response.json()
                         job_hash = result['data']['hash']
 
-                        # Wait for the job to finish
                         while True:
-                            await asyncio.sleep(5)  # Check every 5 seconds
+                            await asyncio.sleep(5)
                             async with session.get(f'https://mvsep.com/api/separation/get?hash={job_hash}') as status_response:
                                 if status_response.status == 200:
                                     status_result = await status_response.json()
                                     if status_result['status'] == 'done':
                                         separated_files = status_result['data']['files']
                                         urls = [file['url'] for file in separated_files]
-                                        await interaction.followup.send(f"Audio separated successfully! Download them here:\n" + "\n".join(urls))
+                                        await interaction.user.send(f"Audio separated successfully! Download them here:\n" + "\n".join(urls))
+                                        logging.info(f"User: {interaction.user} - seperated audio - audio urls: {urls}")
                                         break
                                     elif status_result['status'] == 'failed':
-                                        await interaction.followup.send(f"Audio separation failed: {status_result['data']['message']}")
+                                        await interaction.user.send(f"Audio separation failed: {status_result['data']['message']}")
+                                        logging.error(f"User: {interaction.user} - Error: {status_result['data']['message']} ")
                                         break
                                 else:
-                                    await interaction.followup.send(f"Failed to check status. Status code: {status_response.status}")
+                                    await interaction.user.send(f"Failed to check status. Status code: {status_response.status}")
+                                    logging.error(f"User: {interaction.user} - Error: {status_response.status} ")
                                     break
-
                     else:
-                        await interaction.followup.send(f"Failed to separate audio. Status code: {response.status}")
-        
-        # Clean up the downloaded file
+                        await interaction.user.send(f"Failed to separate audio. Status code: {response.status}")
         os.remove(file_path)
     except aiohttp.ClientConnectorError as e:
-        await interaction.followup.send(f"Error connecting to the MVSEP API: {e}")
+        await interaction.user.send(f"Error connecting to the MVSEP API: {e}")
     except Exception as e:
-        await interaction.followup.send(f"An error occurred: {e}")
-
+        await interaction.user.send(f"An error occurred: {e}")
+        
 @bot.tree.command(name="kill", description="murder")
 async def kill(interaction: discord.Interaction, user: str):
   """
@@ -149,6 +255,47 @@ async def kill(interaction: discord.Interaction, user: str):
 
   await interaction.response.send_message(f"{user} was killed")
 
+import asyncio
+from datetime import datetime, timedelta
+
+
+@bot.tree.command(name="reminder", description="Set a reminder.")
+async def reminder(interaction: discord.Interaction, time: str, *, message: str):
+    """
+    Set a reminder.
+
+    Usage: /reminder <time> <message>
+
+    Time format:
+    - 5s (seconds)
+    - 10m (minutes)
+    - 1h (hour)
+    - 2d (days)
+
+    Example: /reminder 1h Study for the exam
+    """
+    time_unit = time[-1]
+    time_amount = int(time[:-1])
+    if time_unit == "s":
+        delta = timedelta(seconds=time_amount)
+    elif time_unit == "m":
+        delta = timedelta(minutes=time_amount)
+    elif time_unit == "h":
+        delta = timedelta(hours=time_amount)
+    elif time_unit == "d":
+        delta = timedelta(days=time_amount)
+    else:
+        await interaction.response.send_message("Invalid time format. Use s/m/h/d for seconds/minutes/hours/days.", ephemeral=True)
+        logging.error(f"User: {interaction.user} - Error: Invalid time format. Use s/m/h/d for seconds/minutes/hours/days")
+        return
+
+    await interaction.response.send_message(f"Reminder set for {time} from now.") 
+    logging.info(f"User:{interaction.user} - set a timer for {time}")
+
+    await asyncio.sleep(delta.total_seconds())
+    await interaction.channel.send(f"<@{interaction.user.id}> ⏰ Reminder: {message}") 
+    logging.info(f"User:{interaction.user} - Reminder: {message}")
+
 @bot.tree.command(name="hunger_games", description="Start a Hunger Games simulation with Discord users.")
 async def hunger_games(interaction: discord.Interaction, *, users: str):
     """Start a Hunger Games simulation.
@@ -156,17 +303,17 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
     /hunger_games @user1 @user2 @user3 @user4
     """
 
-    # Respond to the interaction first to create the message
+
     await interaction.response.send_message(f"Gathering tributes... This might take a moment.")
 
-    # Retrieve mentioned users from the interaction data
+
     mentioned_users = interaction.data['resolved']['members'].values()
 
     if len(mentioned_users) < 2:
         await interaction.followup.send("Please mention at least two Discord users to participate.")
         return
 
-    # Create Participants using user IDs
+
     participants = [Participant(user['user']['username'], user['user']['id'], user['user']['avatar']) for user in mentioned_users]
 
     game = HungerGames(participants)
@@ -217,7 +364,6 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
         embed.description = "\n\n".join(round_messages)
         await interaction.channel.send(embed=embed)
 
-        # --- Wait for User Response ---
         await interaction.channel.send("Type 'next' to continue...")
         def check(m):
             return m.author == interaction.user and m.channel == interaction.channel and m.content.lower() == 'next'
@@ -235,10 +381,9 @@ async def hunger_games(interaction: discord.Interaction, *, users: str):
         embed = Embed(title="🏆 The Victor 🏆", color=discord.Color.gold())
         embed.description = f"{winner.name} has won the Hunger Games!"
 
-        # Find the winner's user object
         winner_user = interaction.guild.get_member(winner.user_id) 
         if winner_user:
-            embed.set_thumbnail(url=winner_user.avatar.url)  # Set winner's avatar as thumbnail
+            embed.set_thumbnail(url=winner_user.avatar.url) 
 
         await interaction.channel.send(embed=embed)
     else:
@@ -288,13 +433,13 @@ async def search_github_projects(interaction: discord.Interaction, query: str):
         query: The GitHub search query (e.g., 'machine learning', 'topic:natural-language-processing').
     """
     try:
-        # Search for repositories
+
         url = "https://api.github.com/search/repositories"
         params = {
             "q": query,
             "sort": "stars",
             "order": "desc",
-            "per_page": 1 # Get top 5 matching repos
+            "per_page": 1 
         }
 
         response = requests.get(url, params=params)
@@ -305,7 +450,7 @@ async def search_github_projects(interaction: discord.Interaction, query: str):
         if matching_repos:
             embed = discord.Embed(
                 title=f"GitHub Project Search Results for: {query}",
-                color=discord.Color.green()  # Use a different color for search
+                color=discord.Color.green() 
             )
 
             for repo in matching_repos:
@@ -353,7 +498,6 @@ async def trending_projects(interaction: discord.Interaction, query: str = "topi
                Defaults to 'topic:language-model'.
     """
     try:
-        # Get trending repositories
         url = "https://api.github.com/search/repositories"
         date_threshold = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
         params = {
@@ -379,14 +523,13 @@ async def trending_projects(interaction: discord.Interaction, query: str = "topi
                 repo_url = repo['html_url']
                 description = repo['description'] or "No description."
 
-                # Create the field value with the link SEPARATELY:
                 field_value = f"{description}\n"
                 field_value += f"⭐ {repo['stargazers_count']}   "
                 field_value += f"🍴 {repo['forks_count']}"
 
-                # Add the field with the name as the link:
+
                 embed.add_field(
-                        name=f"{repo_name}",  # Only the repo name here, no bolding or linking 
+                        name=f"{repo_name}",
                         value=f"**[Link to Repo]({repo_url})**\n{description}\n"
                               f"⭐ {repo['stargazers_count']}   "
                               f"🍴 {repo['forks_count']}",
@@ -410,6 +553,36 @@ async def set_system_prompt(interaction: discord.Interaction, prompt: str):
     await interaction.response.send_message(f"System prompt set to:\n```\n{prompt}\n``` for the entire bot.")
 
 
+@bot.tree.command(name="speak")
+async def speak(interaction: discord.Interaction, text: str):
+    """Speaks the given text in the user's voice channel."""
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        return
+    if interaction.user.voice is None:
+        await interaction.response.send_message("You are not connected to a voice channel.", ephemeral=True)
+        return
+    voice_channel = interaction.user.voice.channel
+    if interaction.guild.voice_client is None:
+        await voice_channel.connect() 
+    vc = interaction.guild.voice_client 
+    try:
+        tts = edge_tts.Communicate(text, "en-US-JennyNeural")
+
+        if not os.path.exists("temp"):
+            os.makedirs("temp")
+
+        await tts.save("temp/tts.mp3") 
+
+        source = discord.FFmpegPCMAudio("temp/tts.mp3")
+        vc.play(source, after=lambda e: print(f'Finished playing: {e}'))
+
+        while vc.is_playing():
+            await asyncio.sleep(1) 
+
+    except Exception as e:
+        await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
+        return
 
 @bot.tree.command(name="control_my_computer", description="Write and run code using an LLM (Admin Only).")
 async def create_code(interaction: discord.Interaction, code_request: str):
@@ -417,13 +590,13 @@ async def create_code(interaction: discord.Interaction, code_request: str):
         await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
     try:
-        # 1. Use Groq to generate code with execution instructions
         prompt = f"""Write a {code_language} code snippet that will create and run: {code_request}
         the computer is windows 11
         The code should be executable directly. 
         Do not include any backticks or language identifiers in the output.
         have the code by itself with NO explanation
         never explain the code or give anything that is not just the pure code
+        do not give any extra info
         name for windows user is user1 for file paths
         """
         chat_completion = client.chat.completions.create(
@@ -431,16 +604,11 @@ async def create_code(interaction: discord.Interaction, code_request: str):
             model="llama3-70b-8192"
         )
         generated_code = chat_completion.choices[0].message.content
-        generated_code = generated_code.strip("`")  # Remove backticks
-        generated_code_lobotomised = generated_code[:100]  # Truncate to 1999 characters
-        # 2. Send the generated code back to the user
+        generated_code = generated_code.strip("`") 
+        generated_code_lobotomised = generated_code[:100] 
         await interaction.channel.send(f"prompt: {code_request}")
-        
-        # Log the shit
         logging.info(f"User: {interaction.user} - Prompt: {code_request} - Generated Code: {generated_code}")
-        # 3. generate the generated code :fire:
         result = await execute_code(generated_code, code_language)
-        # 4. tell user shit
         if result == "No output.":
             await interaction.channel.send("Script ran")
             logging.info(f"User: {interaction.user} - {result}")
@@ -497,21 +665,18 @@ async def summarize(interaction: discord.Interaction, text: str):
 
         if selected_model in gemini_models:
             try:
-                # Create a Gemini model instance (do this once, maybe outside the function)
                 gemini_model = gemini.GenerativeModel(selected_model) 
 
-                # Use the model instance to generate content
                 response = gemini_model.generate_content( 
                     f"Summarize the following text:\n\n{text}",
                 )
 
-                # Extract the summary from the response
                 summary = response.text
                 await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
             except Exception as e:
                 await interaction.response.send_message(f"An error occurred while processing the request: {e}")
 
-        else: # Use Groq API for summarization
+        else:
             system_prompt = bot_settings["system_prompt"]
             chat_completion = client.chat.completions.create(
                 messages=[
@@ -522,7 +687,6 @@ async def summarize(interaction: discord.Interaction, text: str):
             )
             summary = chat_completion.choices[0].message.content
 
-            # Log the interaction, not the text string
             logging.info(f"User: {message} - Model: {selected_model} - Summary: {summary}")
 
             await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
@@ -532,6 +696,10 @@ async def summarize(interaction: discord.Interaction, text: str):
         logging.error(f"An error occurred: {e}")
 
 
+@bot.tree.command(name="ping", description="Get the bot's latency.")
+async def ping(interaction: discord.Interaction):
+    latency = bot.latency * 1000 
+    await interaction.response.send_message(f"Pong! Latency is {latency:.2f} ms")
 
 @bot.tree.command(name="summarize_website", description="summarize a website.")
 async def summarize_website(interaction: discord.Interaction, website_url: str):
@@ -541,39 +709,36 @@ async def summarize_website(interaction: discord.Interaction, website_url: str):
     await interaction.response.defer() 
     try:
         response = requests.get(website_url)
-        response.raise_for_status()  # Raise an exception for bad status codes
+        response.raise_for_status() 
 
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Extract relevant text from the website
         extracted_text = ""
         for paragraph in soup.find_all('p'):
             extracted_text += paragraph.get_text() + "\n"
 
-        if not extracted_text.strip():  # Check if extracted_text is empty
+        if not extracted_text.strip(): 
             await interaction.response.send_message(content="Error: No text found on the website.") 
             return 
 
-        # Use the LLM to summarize the extracted text
         selected_model = bot_settings["model"]
         if extracted_text == None:
          if selected_model in gemini_models:
             try:
-                # Create a Gemini model instance (do this once, maybe outside the function)
+
                 gemini_model = gemini.GenerativeModel(selected_model) 
 
-                # Use the model instance to generate content
                 response = gemini_model.generate_content( 
                     f"Summarize the following text:\n\n{extracted_text}",
                 )
 
-                # Extract the summary from the response
+
                 summary = response.text
                 await interaction.response.send_message(f"Summary:\n```\n{summary}\n```")
             except Exception as e:
                 await interaction.response.send_message(f"An error occurred while processing the request: {e}")
 
-        else:  # Use Groq API for summarization
+        else:
             lobotomised_extracted_text = extracted_text[:10000] 
             system_prompt = bot_settings["system_prompt"]
             chat_completion = client.chat.completions.create(
@@ -586,7 +751,7 @@ async def summarize_website(interaction: discord.Interaction, website_url: str):
             summary = chat_completion.choices[0].message.content
             
 
-            # Log the interaction, not the text string
+
             logging.info(f"User: {interaction.user} - Website: {website_url} - Model: {selected_model} extracted text: {extracted_text} - Summary: {summary}")
             lobotomised_summary = summary[:1900]
             await interaction.followup.send(f"Summary of <{website_url}>:\n```\n{lobotomised_summary}\n```")
@@ -598,52 +763,149 @@ async def summarize_website(interaction: discord.Interaction, website_url: str):
         logging.error(f"An error occurred: {e}")
 
 
-@bot.tree.command(name="play_audio", description="Join a voice channel and play audio. (Authorized users only)")
-async def play_audio(interaction: discord.Interaction, channel: discord.VoiceChannel):
-    """Joins a specified voice channel and plays an audio file.
-
-    Args:
-        channel: The voice channel to join.
+@bot.tree.command(name="dm", description="Send a direct message to a user. (Authorized users only)")
+async def dm(interaction: discord.Interaction, user: discord.User, *, message: str):
     """
+    Sends a direct message to a specified user
 
+    Usage: /dm <user> <message>
+
+    Example: /dm @username hello there
+    """
     if not is_authorized(interaction):
-        await interaction.response.send_message(
-            "You are not authorized to use this command.", ephemeral=True
-        )
-        return
-
-    # Check if the bot is already connected to a voice channel
-    if interaction.guild.voice_client:
-        await interaction.response.send_message(
-            "The bot is already connected to a voice channel.", ephemeral=True
-        )
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
 
     try:
-        # Connect to the specified voice channel
-        await channel.connect()
-        await interaction.response.send_message(
-            f"Connected to voice channel: {channel.name}", ephemeral=True
-        )
+        await user.send(message)
+        await interaction.response.send_message(f"Message sent to {user.mention} successfully.", ephemeral=True)
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="Direct Message Sent",
+                color=discord.Color.blue() 
+            )
+            embed.add_field(name="From", value=interaction.user.mention, inline=False)
+            embed.add_field(name="To", value=user.mention, inline=False)
+            embed.add_field(name="Message", value=message, inline=False)
+            await log_channel.send(embed=embed)
+        else:
+            print(f"WARNING: Log channel with ID {LOG_CHANNEL_ID} not found.")
 
-        # Path to your audio file (replace with the actual path)
-        audio_file = r"path to audio shit"
+    except discord.HTTPException as e:
+        await interaction.response.send_message(f"Failed to send message: {e}", ephemeral=True)
 
-        # Create a StreamPlayer for the audio
-        source = discord.FFmpegPCMAudio(audio_file)
-        interaction.guild.voice_client.play(source)
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(
+                title="Direct Message Failed",
+                color=discord.Color.red() 
+            )
+            embed.add_field(name="From", value=interaction.user.mention, inline=False)
+            embed.add_field(name="To", value=user.mention, inline=False)
+            embed.add_field(name="Error", value=e, inline=False)
+            await log_channel.send(embed=embed)
+        else:
+            print(f"WARNING: Log channel with ID {LOG_CHANNEL_ID} not found.")
 
-        # Wait until the audio finishes playing
-        while interaction.guild.voice_client.is_playing():
-            await asyncio.sleep(1)
+# ytdlp options 
+ytdlp_opts = {
+    'format': 'bestaudio/best',
+    'extract-audio': True,  
+    'noplaylist': True,
+    'audio-format': 'mp3',  
+    'outtmpl': 'yt/%(id)s.%(ext)s',  
+    'postprocessors': [{  
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '128',
+    }],
+}
+audio_queue = [] 
+loop_enabled = False  
 
-        # Disconnect from the voice channel
-        await interaction.guild.voice_client.disconnect()
+
+
+@bot.tree.command(name="play", description="Play audio from a YouTube link or search YouTube.")
+async def play(interaction: discord.Interaction, *, query: str):
+    if not is_authorized(interaction):
+        await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+        return
+
+    if interaction.user.voice is None:
+        await interaction.response.send_message("You need to be connected to a voice channel.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    voice_channel = interaction.user.voice.channel
+    vc = interaction.guild.voice_client
+
+    if vc is None:
+        if voice_channel.permissions_for(interaction.guild.me).connect:
+            vc = await voice_channel.connect()
+        else:
+            await interaction.followup.send("I don't have permission to join that channel!", ephemeral=True)
+            return
+
+    try:
+        if not query.startswith(('https://', 'http://')):
+            query = f"ytsearch:{query}"
+
+        with yt_dlp.YoutubeDL(ytdlp_opts) as ydl:
+            info = ydl.extract_info(query, download=True)
+            if 'entries' in info:
+                info = info['entries'][0]
+            audio_file = ydl.prepare_filename(info).replace('.webm', '.mp3')
+
+            while not os.path.exists(audio_file):
+                await asyncio.sleep(1)
+
+            audio_queue.append(audio_file)
+        print(f"Added to queue: {audio_file}")
+
+        if not vc.is_playing():
+            print("Starting playback from queue...")
+            await play_next(interaction, vc)
+            await interaction.followup.send(f"Now playing: {info['title']}")
 
     except Exception as e:
-        await interaction.response.send_message(
-            f"An error occurred: {e}", ephemeral=True
-        )
+        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+        print(f"Full error traceback:\n{traceback.format_exc()}")
+
+async def play_next(interaction: discord.Interaction, vc: discord.VoiceClient):
+    global loop_enabled, audio_queue
+
+    if audio_queue:
+        audio_file = audio_queue.pop(0)
+        print(f"Playing from queue: {audio_file}")
+
+        if not os.path.isfile(audio_file):
+            print(f"Audio file not found: {audio_file}")
+            return
+
+        def after_playing(e):
+            if loop_enabled:
+                audio_queue.append(audio_file)
+            else:
+                if os.path.exists(audio_file):
+                    try:
+                        os.remove(audio_file)
+                        print(f"Deleted: {audio_file}")
+                    except Exception as e:
+                        print(f"Error deleting file: {e}")
+
+            asyncio.run_coroutine_threadsafe(play_next(interaction, vc), bot.loop)
+
+        source = discord.FFmpegPCMAudio(audio_file)
+        vc.play(source, after=lambda e: after_playing(e))
+
+@bot.tree.command(name="loop", description="Toggle audio loop mode.")
+async def loop(interaction: discord.Interaction):
+    global loop_enabled
+    loop_enabled = not loop_enabled
+    await interaction.response.send_message(f"Loop mode is now {'enabled' if loop_enabled else 'disabled'}.")
+
+
 
 
 @bot.tree.command(name="set_context_messages", description="Set the number of context messages to use (1-10) for the entire bot.")
@@ -652,7 +914,7 @@ async def set_context_messages(interaction: discord.Interaction, num_messages: i
         await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
 
-    if 1 <= num_messages <= 10:
+    if 1 <= num_messages <= 100000:
         bot_settings["context_messages"] = num_messages
         await interaction.response.send_message(f"Number of context messages set to: {num_messages} for the entire bot.")
     else:
@@ -664,11 +926,9 @@ async def say(interaction: discord.Interaction, message: str):
         await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
         return
 
-    # Delete the user's command invocation (it will briefly appear)
     await interaction.response.defer(ephemeral=True) 
     await interaction.delete_original_response()
 
-    # Send the message as the bot
     await interaction.channel.send(message)
 
 
@@ -707,19 +967,69 @@ async def show_log(interaction: discord.Interaction):
         logging.error(f"An error occurred while reading the log file: {e}") 
 
 
-# --- Message Handling --- 
+ --- Message Handling --- 
+
+nuhuh = ["adfjhaskjfhaksfhjksa"]
+
+nuhuh_responses = {
+    "adfjhaskjfhaksfhjksa": "nuhuh",
+}
+
+ignored_users = [12, 123] 
+message_reaction_cooldowns = {}
+word_emoji_reactions = {
+    "dflkajdl": "🔥",
+    "dfhkjashf": "askdfhksj", 
+    "skajdhfkjsad": "ksadjfhkjsad"   
+
+}
+word_message_reactions = {
+    "falkdfj": "asdlkfjalsk",
+    "alkdsfjkla": "haskdljfalkdfj" 
+}
 
 @bot.event
 async def on_message(message: Message):
+    if isinstance(message.channel, discord.DMChannel) and message.author != bot.user:
+        global log_channel 
+        log_channel = bot.get_channel(LOG_CHANNEL_ID) 
+        embed = discord.Embed(title="Direct Message Received", color=discord.Color.blue())
+        embed.add_field(name="From", value=f"{message.author.mention} ({message.author.id})", inline=False)
+        embed.add_field(name="Message", value=message.content, inline=False)
+        await log_channel.send(embed=embed)
     await bot.process_commands(message)
+    if isinstance(message.channel, discord.TextChannel): 
 
-    if message.author == bot.user or not bot_settings["llm_enabled"]:
-        return
+        for word in nuhuh:
+            if word.lower() in message.content.lower():
+                try:
+                    await message.delete()
+                    await message.channel.send(nuhuh_responses[word], reference=message.reference)  
+                    logging.warning(f"Deleted message from {message.author} containing '{word}': {message.content}") 
+                except discord.Forbidden:
+                    print("Missing permissions to delete message.")
+                except discord.HTTPException as e:
+                    print(f"Failed to delete message: {e}")
+                break
 
+    if message.author != bot.user: 
+        for word, emoji in word_emoji_reactions.items():
+            if word.lower() in message.content.lower():
+                await message.add_reaction(emoji)
+                break 
+
+
+        for word, response in word_message_reactions.items():
+            if word.lower() in message.content.lower():
+                await message.channel.send(response)
+                break  
+
+    await bot.process_commands(message)
+            
     is_mentioned = bot.user.mentioned_in(message)
     is_reply_to_bot = message.reference is not None and message.reference.resolved.author == bot.user
 
-    if is_mentioned or is_reply_to_bot:
+    if bot_settings["llm_enabled"] and (is_mentioned or is_reply_to_bot): 
         try:
             channel_id = str(message.channel.id)
             messages = conversation_data[channel_id]["messages"]  
@@ -729,7 +1039,7 @@ async def on_message(message: Message):
 
             context_messages = messages[-context_messages_num:]
             api_messages = [{"role": "system", "content": system_prompt}] + context_messages + [{"role": "user", "content": message.content}]
-
+            lobotomised_generated_text = ""
             if selected_model in gemini_models:
                 gemini_model_mapping = {
                     "flash": "gemini-1.5-pro-flash",
@@ -749,7 +1059,7 @@ async def on_message(message: Message):
                 else:
                     await message.channel.send(f"Error: {response.status_code}\n{response.text}")
                     return
-            else: # Groq model
+            else:
                 chat_completion = client.chat.completions.create(
                     messages=api_messages,
                     model=selected_model
@@ -757,7 +1067,7 @@ async def on_message(message: Message):
                 generated_text = chat_completion.choices[0].message.content
                 lobotomised_generated_text = generated_text[:2000] 
             await message.channel.send(lobotomised_generated_text.strip())
-            # Log the skibidi
+
             logging.info(f"User: {message.author} - Message: {message.content} - Generated Text: {generated_text}")
             print(f"user:{message.author}\n message:{message.content}\n output:{generated_text}")
 
@@ -783,6 +1093,9 @@ async def on_ready():
     for guild in bot.guilds:
         print(f"  - {guild.name} (ID: {guild.id})")
         logging.info(f"  - {guild.name} (ID: {guild.id})")
+
+      
+
 
 # Run the bot
 bot.run(DISCORD_TOKEN)
