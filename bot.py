@@ -15,7 +15,7 @@ import textwrap
 import traceback
 import asyncio
 import logging
-from bs4 import BeautifulSoup  # Import BeautifulSoup for web scraping
+from bs4 import BeautifulSoup 
 from hunger_games import HungerGames, Participant 
 import random
 import edge_tts
@@ -26,8 +26,6 @@ import lyricsgenius
 from timeit import default_timer as timer 
 from typing import Any
 import json
-import ee
-from google.oauth2 import service_account
 from PIL import Image
 from PIL.ExifTags import TAGS
 import yt_dlp
